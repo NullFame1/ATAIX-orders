@@ -1,153 +1,247 @@
-import json, re, requests, sys, os
+import json
+import re
+import requests
+import sys
+import os
 
-API_KEY = "API"
+# Константы
+CONFIG_FILE = "config.json"
+ORDERS_FILE = "orders_data.json"
+BASE_URL = "https://api.ataix.kz"
 
-def get_request(endpoint):                      # Создания URL-запроса на ataix.kz
-    url = f"https://api.ataix.kz{endpoint}"
+# Загрузка API-ключа
+def load_config():
+    """Загружает API-ключ из config.json и выводит отладочную информацию."""
+    try:
+        with open(CONFIG_FILE, "r") as f:
+            config = json.load(f)
+            api_key = config.get("api_key")
+            if not api_key:
+                print("Ошибка: API-ключ не найден в config.json")
+                sys.exit(1)
+            print("[DEBUG] API-ключ успешно загружен")
+            return api_key
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"Ошибка загрузки конфигурации: {e}")
+        sys.exit(1)
+
+API_KEY = load_config()
+
+# Класс для работы с API
+class AtaixAPI:
     headers = {
         "accept": "application/json",
         "X-API-Key": API_KEY
     }
-    response = requests.get(url, headers=headers, timeout=20)
-    if response.status_code == 200:
-        return response.json()
+
+    @staticmethod
+    def get(endpoint):
+        """Выполняет GET-запрос к API и выводит отладочную информацию."""
+        try:
+            print(f"[DEBUG] GET-запрос к {BASE_URL}{endpoint}")
+            response = requests.get(f"{BASE_URL}{endpoint}", headers=AtaixAPI.headers, timeout=20)
+            if response.status_code == 200:
+                print(f"[DEBUG] Успешный ответ от API: {response.json()}")
+                return response.json()
+            else:
+                print(f"[ERROR] Ошибка API: {response.status_code}, {response.text}")
+                return None
+        except requests.exceptions.RequestException as e:
+            print(f"[ERROR] Ошибка запроса: {e}")
+            return None
+
+    @staticmethod
+    def post(endpoint, data):
+        """Выполняет POST-запрос к API и выводит отладочную информацию."""
+        headers = AtaixAPI.headers.copy()
+        headers["Content-Type"] = "application/json"
+        try:
+            print(f"[DEBUG] POST-запрос к {BASE_URL}{endpoint} с данными: {data}")
+            response = requests.post(f"{BASE_URL}{endpoint}", headers=headers, json=data, timeout=20)
+            if response.status_code == 200:
+                print(f"[DEBUG] Успешный ответ от API: {response.json()}")
+                return response.json()
+            else:
+                print(f"[ERROR] Ошибка API: {response.status_code}, {response.text}")
+                return None
+        except requests.exceptions.RequestException as e:
+            print(f"[ERROR] Ошибка при отправке запроса: {e}")
+            return None
+
+# Проверка прав доступа API
+def check_api_permissions():
+    """Проверяет доступные права API."""
+    print("\n[INFO] Проверка прав API...")
+    response = AtaixAPI.get("/api/user/info")  # Пример запроса к API для проверки
+    if response and isinstance(response, dict):
+        print("[INFO] API подключен. Доступные права:")
+        for key, value in response.items():
+            print(f"  {key}: {value}")
     else:
-        return f"Ошибка: {response.status_code}, {response.text}"
+        print("[ERROR] Не удалось получить информацию о правах API.")
 
-def find_name_currencies(text, word):   # Поиск уникальных валют на бирже
-    words = re.findall(r'\b\w+\b', text)
-    unique_currencies = set()  # Используем множество для хранения уникальных валют
-    for i in range(len(words) - 1):
-        if words[i] == word:
-            next_word = re.sub(r'[^a-zA-Zа-яА-Я]', '', words[i + 1])
-            unique_currencies.add(next_word)
-    return unique_currencies
+# Вызываем проверку API после загрузки
+check_api_permissions()
 
-name_currencies = find_name_currencies(json.dumps(get_request("/api/symbols")), "base") # Создани списка уникальных валют торгуемых на бирже
-print("Доступный баланс на бирже в токенах USDT")
-for currency in name_currencies:    # Вывод имен валют и их баланс на счету
-    balance_info = get_request(f"/api/user/balances/{currency}")
-    balance = re.search(r"'available':\s*'([\d.]+)'", str(balance_info))
-    if balance:
-        print(currency , "\t\t" , balance.group(1))
 
-def find_symbols(text, word):
-    words = re.findall(r'\b\w+(?:/\w+)?\b', text)
-    pair_sym = []
-    for i in range(len(words) - 1):
-        if words[i] == word:
-            next_word = words[i + 1]
-            pair_sym.append(next_word)
-    return pair_sym
+# Функции обработки данных
+def extract_values(text, key):
+    """Извлекает значения по ключу из JSON-данных"""
+    return re.findall(rf'"{key}":\s*"([^"]+)"', text)
 
-def find_prices(text, word):
-    pattern = rf'{word}[\s\W]*([-+]?\d*\.\d+|\d+)'
-    matches = re.findall(pattern, text)
-    price = []
-    for match in matches:
-        price.append(match)
-    return price
+def get_trading_pairs():
+    """Возвращает список всех торговых пар"""
+    return extract_values(json.dumps(AtaixAPI.get("/api/symbols")), "symbol")
 
-currencies_less_0_6 = []
-price_less_0_6_list = {}
-symbols = find_symbols(json.dumps(get_request("/api/symbols")), "symbol")
-price = find_prices(json.dumps(get_request("/api/prices")), "lastTrade")
-print("\n\nТорговая пара с USDT где минимальная цена меньше или равно 0.6 USDT:")
-for i in range(len(symbols)):
-    if "USDT" in symbols[i] and float(price[i]) <= 0.6:
-        print(f"{symbols[i]}\t{price[i]}")
-        currencies_less_0_6.append(symbols[i])
-        price_less_0_6_list[symbols[i]] = price[i]
+def get_prices():
+    """Возвращает список всех цен"""
+    return extract_values(json.dumps(AtaixAPI.get("/api/prices")), "lastTrade")
 
-while True:
-    current_cur = input("Выберите торговую пару (TRX, IMX, 1INCH) --> ").upper()
-    if  current_cur + "/USDT" in currencies_less_0_6:
-        current_cur = current_cur
-        price_less_0_6 = price_less_0_6_list[current_cur + "/USDT"]
-        break
-    elif current_cur == "EXIT":
-        sys.exit()
-    else:
-        print("Такой торговой пары нет в списке")
+def get_balances():
+    """Получает баланс всех валют и выводит его в удобном формате"""
+    print("\nДоступный баланс на бирже (только валюты с ненулевым балансом):")
+    print("-" * 30)
+    print(f"{'Валюта':<10} {'Баланс':>15}")
+    print("-" * 30)
 
-print(current_cur, "\t\t", price_less_0_6)
-price_2pc = round(float(price_less_0_6)*0.98, 4)
-price_5pc = round(float(price_less_0_6)*0.95, 4)
-price_8pc = round(float(price_less_0_6)*0.92, 4)
-print(f"Следующим шагом будет создано три ордера на покупку токена {current_cur},\nбудет куплено по одному токену с уменьшением цены на\n2%({price_2pc}$), 5%,({price_5pc}$) 8%({price_8pc}$)\nЕсли Вы согласны напишите \"yes\"")
+    symbols_data = AtaixAPI.get("/api/symbols")
+    if not isinstance(symbols_data, dict):
+        print("Ошибка получения списка валют.")
+        return
 
-while True:
-    x = input("--> ")
-    if x == "yes":
-        break
-    elif x == "exit":
-        sys.exit()
+    currencies = set(extract_values(json.dumps(symbols_data), "base"))
 
-def post_orders(symbol, price):                      # Создания URL-запроса на ataix.kz
-    url = "https://api.ataix.kz/api/orders"
-    headers = {
-        "accept": "application/json",
-        "X-API-Key": API_KEY,
-        "Content-Type": "application/json"
-    }
-    data = {
-        "symbol": symbol,
+    for currency in currencies:
+        balance_info = requests.get(
+            f"{BASE_URL}/api/user/balances/{currency}",
+            headers={
+                "X-API-Key": API_KEY,
+                "Accept": "application/json"
+            },
+            timeout=10
+        ).json()
+
+        # Отладочный вывод
+        print(f"DEBUG: Ответ API для {currency} -> {balance_info}")
+
+        if isinstance(balance_info, dict) and balance_info.get("status") is True and "available" in balance_info:
+            try:
+                available_balance = float(balance_info["available"])
+                if available_balance > 0:
+                    print(f"{currency:<10} {available_balance:>15.4f}")
+            except ValueError:
+                print(f"Ошибка: некорректный формат баланса для {currency} -> {balance_info['available']}")
+
+    print("-" * 30)
+
+
+# Получение списка пар, где цена <= 0.6 USDT
+def get_low_price_pairs():
+    pairs = get_trading_pairs()
+    prices = get_prices()
+    low_price_pairs = {pairs[i]: float(prices[i]) for i in range(len(pairs)) if "USDT" in pairs[i] and float(prices[i]) <= 0.6}
+
+    print("\n\nТорговые пары с USDT, где цена ≤ 0.6 USDT:")
+    for pair, price in low_price_pairs.items():
+        print(f"{pair}\t{price}")
+
+    return low_price_pairs
+
+# Выбор пары
+def select_pair(low_price_pairs):
+    while True:
+        choice = input("Выберите торговую пару --> ").upper()
+        if f"{choice}/USDT" in low_price_pairs:
+            return choice, low_price_pairs[f"{choice}/USDT"]
+        elif choice == "EXIT":
+            sys.exit()
+        else:
+            print("Такой торговой пары нет в списке")
+
+# Выбор процента скидки
+def select_discount():
+    while True:
+        discount = input("Введите процент скидки (2, 5, 8) --> ").strip()
+        if discount in ["2", "5", "8"]:
+            return int(discount)
+        print("Ошибка! Введите 2, 5 или 8.")
+
+# Рассчет цены для ордера
+def calculate_order_price(price, discount):
+    return round(price * (1 - discount / 100), 4)
+
+# Подтверждение покупки
+def confirm_purchase(pair, price):
+    print(f"\nБудет создан один ордер на покупку {pair} по цене {price} USDT")
+    print('Если согласны, напишите "yes"')
+    while True:
+        if (response := input("--> ").lower()) == "yes":
+            return True
+        elif response == "exit":
+            sys.exit()
+
+# Создание ордера
+def create_orders(pair, price):
+    """Создает ордер на покупку по заданной цене."""
+    print(f"DEBUG: Создание ордера -> пара: {pair}/USDT, цена: {price} USDT, кол-во: 1")
+
+    order_data = {
+        "symbol": f"{pair}/USDT",
         "side": "buy",
         "type": "limit",
         "quantity": 1,
         "price": price
     }
-    response = requests.post(url, headers=headers, json=data, timeout=20)
-    if response.status_code == 200:
-        return response.json()
+
+    response = AtaixAPI.post("/api/orders", order_data)
+
+    # Отладочный вывод ответа от API
+    print(f"DEBUG: Ответ API -> {response}")
+
+    if isinstance(response, dict) and "result" in response:
+        return {
+            "orderID": response["result"]["orderID"],
+            "price": response["result"]["price"],
+            "quantity": response["result"]["quantity"],
+            "symbol": response["result"]["symbol"],
+            "created": response["result"]["created"],
+            "status": response["result"].get("status", "NEW")
+        }
     else:
-        return f"Ошибка: {response.status_code}, {response.text}"
+        print("Ошибка при создании ордера.")
+        return None
 
-order_2pc = post_orders(current_cur + "/USDT", price_2pc)
-order_data_2pc = {
-    "orderID": order_2pc["result"]["orderID"],
-    "status": order_2pc["result"].get("status", "NEW")  # Если статус не найден, ставим "NEW"
-}
 
-order_5pc = post_orders(current_cur + "/USDT", price_5pc)
-order_data_5pc = {
-    "orderID": order_5pc["result"]["orderID"],
-    "status": order_5pc["result"].get("status", "NEW")  # Если статус не найден, ставим "NEW"
-}
+# Сохранение ордера в файл
+def save_order(order):
+    existing_orders = []
+    if os.path.exists(ORDERS_FILE):
+        with open(ORDERS_FILE, "r") as file:
+            try:
+                existing_orders = json.load(file)
+            except json.JSONDecodeError:
+                pass
 
-order_8pc = post_orders(current_cur + "/USDT", price_8pc)
-order_data_8pc = {
-    "orderID": order_8pc["result"]["orderID"],
-    "status": order_8pc["result"].get("status", "NEW")  # Если статус не найден, ставим "NEW"
-}
-orders_list = [order_2pc, order_5pc, order_8pc]
-# Файл для хранения данных
-filename = "orders_data.json"
+    with open(ORDERS_FILE, "w") as file:
+        json.dump(existing_orders + [order], file, indent=4)
 
-# Загружаем старые данные, если файл существует
-if os.path.exists(filename):
-    with open(filename, "r") as file:
-        try:
-            orders = json.load(file)
-        except json.JSONDecodeError:
-            orders = []
-else:
-    orders = []
+    print(f"[+] Ордер успешно создан и сохранён в {ORDERS_FILE}. Проверьте его на ATAIX во вкладке 'Мои ордера'.")
 
-# Добавляем новые заказы в список
-for order in orders_list:
-    order_data = {
-        "orderID": order["result"]["orderID"],
-        "price": order["result"]["price"],
-        "quantity": order["result"]["quantity"],
-        "symbol": order["result"]["symbol"],
-        "created": order["result"]["created"],
-        "status": order["result"].get("status", "NEW")  # Если статуса нет, ставим "NEW"
-    }
-    orders.append(order_data)
+# Основной сценарий работы
+def main():
+    get_balances()
+    low_price_pairs = get_low_price_pairs()
 
-# Записываем в файл
-with open(filename, "w") as file:
-    json.dump(orders, file, indent=4)
+    pair, current_price = select_pair(low_price_pairs)
+    discount = select_discount()
+    order_price = calculate_order_price(current_price, discount)
 
-print("[+]Ордера успешно созданы. Для проверки результата посетите сайт ATAIX, вкладка \"Мои ордера\". Данные успешно сохранены в", filename)
+    if confirm_purchase(pair, order_price):
+        order = create_orders(pair, order_price)
+        if order:
+            save_order(order)
+        else:
+            print("Ошибка при создании ордера.")
+
+if __name__ == "__main__":
+    main()
