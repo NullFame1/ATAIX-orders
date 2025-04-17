@@ -166,13 +166,29 @@ def select_discount():
             return int(discount)
         print("Ошибка! Введите 2, 5 или 8.")
 
+# Выбор количества
+def select_quantity():
+    while True:
+        quantity = input("Введите количество токенов --> ").strip()
+        try:
+            quantity = float(quantity)
+            if quantity > 0:
+                return quantity
+            else:
+                print("Ошибка! Количество должно быть положительным числом.")
+        except ValueError:
+            print("Ошибка! Введите корректное число.")
+
+
 # Рассчет цены для ордера
 def calculate_order_price(price, discount):
     return round(price * (1 - discount / 100), 4)
 
 # Подтверждение покупки
-def confirm_purchase(pair, price):
-    print(f"\nБудет создан один ордер на покупку {pair} по цене {price} USDT")
+def confirm_purchase(pair, price, quantity):
+    total_price = round(price * quantity, 4)
+    print(f"\nБудет создан ордер на покупку {quantity} {pair} по цене {price} USDT за 1 шт.")
+    print(f"Итого: {total_price} USDT")
     print('Если согласны, напишите "yes"')
     while True:
         if (response := input("--> ").lower()) == "yes":
@@ -180,22 +196,22 @@ def confirm_purchase(pair, price):
         elif response == "exit":
             sys.exit()
 
+
 # Создание ордера
-def create_orders(pair, price):
-    """Создает ордер на покупку по заданной цене."""
-    print(f"DEBUG: Создание ордера -> пара: {pair}/USDT, цена: {price} USDT, кол-во: 1")
+def create_orders(pair, price, quantity):
+    """Создает ордер на покупку по заданной цене и количеству."""
+    print(f"DEBUG: Создание ордера -> пара: {pair}/USDT, цена: {price} USDT, кол-во: {quantity}")
 
     order_data = {
         "symbol": f"{pair}/USDT",
         "side": "buy",
         "type": "limit",
-        "quantity": 1,
+        "quantity": quantity,
         "price": price
     }
 
     response = AtaixAPI.post("/api/orders", order_data)
 
-    # Отладочный вывод ответа от API
     print(f"DEBUG: Ответ API -> {response}")
 
     if isinstance(response, dict) and "result" in response:
@@ -210,6 +226,7 @@ def create_orders(pair, price):
     else:
         print("Ошибка при создании ордера.")
         return None
+
 
 
 # Сохранение ордера в файл
@@ -227,6 +244,16 @@ def save_order(order):
 
     print(f"[+] Ордер успешно создан и сохранён в {ORDERS_FILE}. Проверьте его на ATAIX во вкладке 'Мои ордера'.")
 
+    # Запись в history.txt
+    history_line = (
+        f"ВЫСТАВЛЕН ОРДЕР НА ПОКУПКУ:  OrderID {order['orderID']}, "
+        f"цена {order['price']}, кол-во {order['quantity']}, "
+        f"символ {order['symbol']}, время {order['created']}\n"
+    )
+    with open("history.txt", "a", encoding="utf-8") as history_file:
+        history_file.write(history_line)
+
+
 # Основной сценарий работы
 def main():
     get_balances()
@@ -234,14 +261,26 @@ def main():
 
     pair, current_price = select_pair(low_price_pairs)
     discount = select_discount()
+    quantity = select_quantity()
     order_price = calculate_order_price(current_price, discount)
 
-    if confirm_purchase(pair, order_price):
-        order = create_orders(pair, order_price)
+    if confirm_purchase(pair, order_price, quantity):
+        order = create_orders(pair, order_price, quantity)
         if order:
             save_order(order)
         else:
             print("Ошибка при создании ордера.")
 
+
 if __name__ == "__main__":
-    main()
+    while True:
+        main()
+        user_input = input('Введите "start" чтобы запустить снова или "exit" чтобы выйти: ').strip().lower()
+        if user_input == "exit":
+            print("Выход из программы.")
+            break
+        elif user_input == "start":
+            print("Перезапуск...")
+        else:
+            print('Неверный ввод. Ожидалось "start" или "exit". Выход из программы.')
+            break
