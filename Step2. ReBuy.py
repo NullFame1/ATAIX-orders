@@ -5,13 +5,13 @@ import sys
 # Константы
 CONFIG_FILE = "config.json"
 ORDERS_FILE = "orders_data.json"
+HISTORY_FILE = "history.txt"
 BASE_URL = "https://api.ataix.kz"
 
 # Загрузка API-ключа
 def load_config():
-    """Загружает API-ключ из config.json и выводит отладочную информацию."""
     try:
-        with open(CONFIG_FILE, "r") as f:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             config = json.load(f)
             api_key = config.get("api_key")
             if not api_key:
@@ -34,7 +34,6 @@ class AtaixAPI:
 
     @staticmethod
     def get(endpoint):
-        """Выполняет GET-запрос к API и выводит отладочную информацию."""
         try:
             print(f"[DEBUG] GET-запрос к {BASE_URL}{endpoint}")
             response = requests.get(f"{BASE_URL}{endpoint}", headers=AtaixAPI.headers, timeout=20)
@@ -50,7 +49,6 @@ class AtaixAPI:
 
     @staticmethod
     def delete(endpoint):
-        """Выполняет DELETE-запрос к API для отмены ордера."""
         try:
             print(f"[DEBUG] DELETE-запрос к {BASE_URL}{endpoint}")
             response = requests.delete(f"{BASE_URL}{endpoint}", headers=AtaixAPI.headers, timeout=20)
@@ -66,7 +64,6 @@ class AtaixAPI:
 
     @staticmethod
     def post(endpoint, data):
-        """Выполняет POST-запрос для создания нового ордера."""
         try:
             print(f"[DEBUG] POST-запрос к {BASE_URL}{endpoint} с данными: {data}")
             response = requests.post(f"{BASE_URL}{endpoint}", headers=AtaixAPI.headers, json=data, timeout=20)
@@ -80,12 +77,19 @@ class AtaixAPI:
             print(f"[ERROR] Ошибка запроса на создание ордера: {e}")
             return None
 
-
-# Функция для обновления статуса ордера в файле
-def update_order_status(order_id, status):
-    """Обновляет статус ордера в файле orders_data.json"""
+# Вспомогательные функции
+def write_to_history(order, action="ПЕРЕЗАПУСК Buy: "):
     try:
-        with open(ORDERS_FILE, "r") as file:
+        with open(HISTORY_FILE, "a", encoding="utf-8") as file:
+            log_line = f"{action} OrderID {order['orderID']}, цена {order['price']}, кол-во {order['quantity']}, символ {order['symbol']}, время {order['created']}\n"
+            file.write(log_line)
+        print(f"[DEBUG] Ордер {order['orderID']} записан в history.txt.")
+    except Exception as e:
+        print(f"[ERROR] Ошибка при записи в history.txt: {e}")
+
+def update_order_status(order_id, status):
+    try:
+        with open(ORDERS_FILE, "r", encoding="utf-8") as file:
             orders = json.load(file)
 
         for order in orders:
@@ -94,31 +98,38 @@ def update_order_status(order_id, status):
                 print(f"[DEBUG] Обновлен статус ордера {order_id} на {status}")
                 break
 
-        with open(ORDERS_FILE, "w") as file:
-            json.dump(orders, file, indent=4)
+        with open(ORDERS_FILE, "w", encoding="utf-8") as file:
+            json.dump(orders, file, indent=4, ensure_ascii=False)
         print(f"[DEBUG] Статус ордера {order_id} успешно обновлен в файле.")
     except Exception as e:
         print(f"[ERROR] Ошибка при обновлении статуса ордера: {e}")
 
-# Функция для создания нового ордера с 1% выше цены
-def create_orders(pair, price):
-    """Создает ордер на покупку по заданной цене."""
-    print(f"DEBUG: Создание ордера -> пара: {pair}/USDT, цена: {price} USDT, кол-во: 1")
+def remove_order(order_id):
+    try:
+        with open(ORDERS_FILE, "r", encoding="utf-8") as file:
+            orders = json.load(file)
 
-    symbol = f"{pair}"
-    
+        orders = [order for order in orders if order["orderID"] != order_id]
+
+        with open(ORDERS_FILE, "w", encoding="utf-8") as file:
+            json.dump(orders, file, indent=4, ensure_ascii=False)
+
+        print(f"[DEBUG] Ордер {order_id} удален из orders_data.json.")
+    except Exception as e:
+        print(f"[ERROR] Ошибка при удалении ордера: {e}")
+
+def create_orders(pair, price, quantity):
+    print(f"DEBUG: Создание ордера -> пара: {pair}, цена: {price} USDT, кол-во: {quantity}")
+
     order_data = {
-        "symbol": symbol,
+        "symbol": pair,
         "side": "buy",
         "type": "limit",
-        "quantity": 1,
+        "quantity": quantity,
         "price": price
     }
 
     response = AtaixAPI.post("/api/orders", order_data)
-
-    # Отладочный вывод ответа от API
-    print(f"DEBUG: Ответ API -> {response}")
 
     if isinstance(response, dict) and "result" in response:
         return {
@@ -133,60 +144,83 @@ def create_orders(pair, price):
         print("Ошибка при создании ордера.")
         return None
 
-
-# Функция для сканирования ордеров
+# Основная функция
 def scan_orders():
-    """Сканирует ордера, проверяет их статус и обновляет статус в файле, если ордер выполнен."""
     try:
-        with open(ORDERS_FILE, "r") as file:
+        with open(ORDERS_FILE, "r", encoding="utf-8") as file:
             orders = json.load(file)
+
+        orders_to_restart = []
 
         for order in orders:
             order_id = order["orderID"]
-            print(f"[INFO] Проверяем ордер с ID: {order_id}")
+            side = order.get("side", "buy")
+            print(f"[INFO] Проверяем ордер с ID: {order_id}, side: {side}")
+
+            if side.lower() == "sell":
+                print(f"[INFO] Ордер {order_id} на продажу (sell). Пропускаем.")
+                continue
 
             order_status_response = AtaixAPI.get(f"/api/orders/{order_id}")
             if order_status_response:
                 status_from_api = order_status_response.get("result", {}).get("status")
                 if status_from_api:
-                    # Если ордер выполнен, обновляем статус в файле
                     if status_from_api == "filled":
                         print(f"[INFO] Ордер {order_id} выполнен (filled). Обновляем статус.")
                         update_order_status(order_id, "filled")
                     elif status_from_api == "new":
-                        print(f"[INFO] Ордер {order_id} не выполнен (статус: {status_from_api}). Отменяем ордер и создаем новый с ценой на 1% выше.")
-                        
-                        # Отменяем ордер
-                        delete_response = AtaixAPI.delete(f"/api/orders/{order_id}")
-                        if delete_response:
-                            # Обновляем статус ордера в файле на "cancelled"
-                            update_order_status(order_id, "cancelled")
-                            
-                            # Создаем новый ордер с ценой на 1% выше
-                            price = float(order["price"])
-                            new_price = round(price * 1.01, 4)
-                            new_order = create_orders(order["symbol"], new_price)
-                            
-                            if new_order:
-                                # Сохранение нового ордера в файл
-                                with open(ORDERS_FILE, "r") as file:
-                                    orders = json.load(file)
-                                orders.append(new_order)
-
-                                with open(ORDERS_FILE, "w") as file:
-                                    json.dump(orders, file, indent=4)
-
-                                print(f"[INFO] Новый ордер с ID {new_order['orderID']} успешно добавлен в файл.")
+                        print(f"[INFO] Ордер {order_id} не выполнен (new). Готовим к отмене и пересозданию.")
+                        orders_to_restart.append(order)
                     else:
-                        print(f"[INFO] Ордер {order_id} не выполнен (статус: {status_from_api}). Статус остаётся без изменений.")
+                        print(f"[INFO] Ордер {order_id} в статусе {status_from_api}. Статус не изменяем.")
                 else:
-                    print(f"[ERROR] Ошибка получения статуса ордера {order_id}. Ответ API: {order_status_response}")
+                    print(f"[ERROR] Статус ордера {order_id} не получен.")
             else:
-                print(f"[ERROR] Не удалось получить статус ордера {order_id}. Ответ API: {order_status_response}")
-                
+                print(f"[ERROR] Ошибка при получении статуса ордера {order_id}.")
+
+        if orders_to_restart:
+            user_input = input("\n[ВНИМАНИЕ] Найдены ордера для отмены и пересоздания. Введите 'yes' для подтверждения: ").strip().lower()
+            if user_input == "yes":
+                for order in orders_to_restart:
+                    order_id = order["orderID"]
+                    delete_response = AtaixAPI.delete(f"/api/orders/{order_id}")
+                    if delete_response:
+                        write_to_history(order, action="ПЕРЕЗАПУСК Buy: ")
+                        remove_order(order_id)
+
+                        price = float(order["price"])
+                        quantity = float(order["quantity"])  # Учитываем количество токенов из старого ордера
+                        new_price = round(price * 1.01, 4)
+                        new_order = create_orders(order["symbol"], new_price, quantity)
+
+                        if new_order:
+                            with open(ORDERS_FILE, "r", encoding="utf-8") as file:
+                                updated_orders = json.load(file)
+
+                            updated_orders.append(new_order)
+
+                            with open(ORDERS_FILE, "w", encoding="utf-8") as file:
+                                json.dump(updated_orders, file, indent=4, ensure_ascii=False)
+
+                            print(f"[INFO] Новый ордер с ID {new_order['orderID']} успешно добавлен.")
+            else:
+                print("\n[ОТМЕНА] Отмена и пересоздание ордеров не подтверждены. Ничего не меняем.")
+
     except Exception as e:
         print(f"[ERROR] Ошибка при сканировании ордеров: {e}")
 
-# Запуск сканирования ордеров
+
+# Запуск
 if __name__ == "__main__":
-    scan_orders()
+    while True:
+        scan_orders()
+        user_input = input('Введите "start" чтобы запустить снова или "exit" чтобы выйти: ').strip().lower()
+        if user_input == "exit":
+            print("Выход из программы.")
+            break
+        elif user_input == "start":
+            print("Перезапуск сканирования...")
+        else:
+            print('Неверный ввод. Ожидалось "start" или "exit". Выход из программы.')
+            break
+
