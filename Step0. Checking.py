@@ -38,6 +38,7 @@ def get_prices():
     """Цены всех монет и токенов"""
     return get_request("/api/prices")
 
+
 # Запуск интерактивного режима
 if __name__ == "__main__":
     while True:
@@ -61,5 +62,6 @@ if __name__ == "__main__":
         elif command == "exit":
             print("Выход из программы.")
             break
+
         else:
             print("Неизвестная команда. Попробуйте снова.")
