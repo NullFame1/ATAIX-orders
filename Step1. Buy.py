@@ -135,17 +135,18 @@ def get_balances():
     print("-" * 30)
 
 
-# Получение списка пар, где цена <= 0.6 USDT
-def get_low_price_pairs():
+# Получение списка пар
+def get_low_price_pairs(price_limit):
     pairs = get_trading_pairs()
     prices = get_prices()
-    low_price_pairs = {pairs[i]: float(prices[i]) for i in range(len(pairs)) if "USDT" in pairs[i] and float(prices[i]) <= 0.6}
+    low_price_pairs = {pairs[i]: float(prices[i]) for i in range(len(pairs)) if "USDT" in pairs[i] and float(prices[i]) <= price_limit}
 
-    print("\n\nТорговые пары с USDT, где цена ≤ 0.6 USDT:")
+    print(f"\n\nТорговые пары с USDT, где цена ≤ {price_limit} USDT:")
     for pair, price in low_price_pairs.items():
         print(f"{pair}\t{price}")
 
     return low_price_pairs
+
 
 # Выбор пары
 def select_pair(low_price_pairs):
@@ -159,12 +160,19 @@ def select_pair(low_price_pairs):
             print("Такой торговой пары нет в списке")
 
 # Выбор процента скидки
+# Выбор процента скидки
 def select_discount():
     while True:
-        discount = input("Введите процент скидки (2, 5, 8) --> ").strip()
-        if discount in ["2", "5", "8"]:
-            return int(discount)
-        print("Ошибка! Введите 2, 5 или 8.")
+        discount = input("Введите процент скидки (0-100) --> ").strip()
+        try:
+            discount = float(discount)
+            if 0 <= discount <= 100:
+                return discount
+            else:
+                print("Ошибка! Процент скидки должен быть в пределах от 0 до 100.")
+        except ValueError:
+            print("Ошибка! Введите корректное число.")
+
 
 # Выбор количества
 def select_quantity():
@@ -221,11 +229,13 @@ def create_orders(pair, price, quantity):
             "quantity": response["result"]["quantity"],
             "symbol": response["result"]["symbol"],
             "created": response["result"]["created"],
-            "status": response["result"].get("status", "NEW")
+            "status": response["result"].get("status", "NEW"),
+            "cumCommission": response["result"].get("cumCommission", "0")  # << вот сюда добавляем
         }
     else:
         print("Ошибка при создании ордера.")
         return None
+
 
 
 
@@ -239,25 +249,43 @@ def save_order(order):
             except json.JSONDecodeError:
                 pass
 
+    # Добавляем originalID
+    order["originalID"] = order["orderID"]
+
     with open(ORDERS_FILE, "w") as file:
         json.dump(existing_orders + [order], file, indent=4)
 
     print(f"[+] Ордер успешно создан и сохранён в {ORDERS_FILE}. Проверьте его на ATAIX во вкладке 'Мои ордера'.")
 
-    # Запись в history.txt
+    # Запись в history.txt, включая cumCommission
     history_line = (
-        f"ВЫСТАВЛЕН ОРДЕР НА ПОКУПКУ:  OrderID {order['orderID']}, "
+        f"\nВЫСТАВЛЕН ОРДЕР НА ПОКУПКУ:  OrderID {order['orderID']}, "
         f"цена {order['price']}, кол-во {order['quantity']}, "
-        f"символ {order['symbol']}, время {order['created']}\n"
+        f"символ {order['symbol']}, время {order['created']}, "
+        f"originalID {order['originalID']}, комиссия {order.get('cumCommission', '0')}\n\n"
     )
     with open("history.txt", "a", encoding="utf-8") as history_file:
         history_file.write(history_line)
 
 
+def input_price_limit():
+    while True:
+        limit = input("Введите максимальную цену токена в USDT --> ").strip()
+        try:
+            limit = float(limit)
+            if limit > 0:
+                return limit
+            else:
+                print("Ошибка! Цена должна быть положительным числом.")
+        except ValueError:
+            print("Ошибка! Введите корректное число.")
+
+
 # Основной сценарий работы
 def main():
     get_balances()
-    low_price_pairs = get_low_price_pairs()
+    price_limit = input_price_limit()   # <<< Новый ввод лимита
+    low_price_pairs = get_low_price_pairs(price_limit)
 
     pair, current_price = select_pair(low_price_pairs)
     discount = select_discount()
@@ -272,15 +300,16 @@ def main():
             print("Ошибка при создании ордера.")
 
 
+
 if __name__ == "__main__":
     while True:
         main()
-        user_input = input('Введите "start" чтобы запустить снова или "exit" чтобы выйти: ').strip().lower()
+        user_input = input('\nВведите "start" чтобы запустить снова или "exit" чтобы выйти: ').strip().lower()
         if user_input == "exit":
             print("Выход из программы.")
             break
         elif user_input == "start":
             print("Перезапуск...")
         else:
-            print('Неверный ввод. Ожидалось "start" или "exit". Выход из программы.')
+            print('Выход из программы.')
             break
