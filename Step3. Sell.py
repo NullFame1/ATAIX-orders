@@ -96,9 +96,9 @@ def delete_purchase_order_and_log(order_id, related_sell_order=None):
                     f"символ {related_sell_order['symbol']}, "
                     f"время {related_sell_order['created']}, "
                     f"originalID {related_sell_order.get('originalID', 'Не указан')}, "
-                    f"комиссия {related_sell_order['cumCommission']},"
+                    f"комиссия {related_sell_order['cumCommission']}"
                 )
-                history_entry = f"\nВЫСТАВЛЕНО НА ПРОДАЖУ: {sell_order_info}\n"
+                history_entry = f"\nВыставлено на Продажу: {sell_order_info}\n"
 
                 # Запись в history.txt
                 with open("history.txt", "a", encoding="utf-8") as history_file:
