@@ -78,7 +78,7 @@ class AtaixAPI:
             return None
 
 # Вспомогательные функции
-def write_to_history(order, action="ПЕРЕЗАПУСК Sell: "):
+def write_to_history(order, action="Перезапуск Продажи: "):
     try:
         # Используем averagePrice, если он есть, иначе обычную price
         price_str = order.get('averagePrice') or order.get('price')
@@ -91,10 +91,10 @@ def write_to_history(order, action="ПЕРЕЗАПУСК Sell: "):
             original_id = order.get('originalID', order['orderID'])
             log_line = (f"{action} OrderID {order_id}, "
                         f"цена {price}, кол-во {order['quantity']}, символ {order['symbol']}, "
-                        f"время {order['created']}, OriginalID {original_id}, комиссия {commission}\n")
+                        f"время {order['created']}, originalID {original_id}, комиссия {commission}\n")
             file.write(log_line)
 
-        print(f"[DEBUG] Ордер {order_id} (OriginalID {original_id}) записан в history.txt с ценой {price}.")
+        print(f"[DEBUG] Ордер {order_id} (originalID {original_id}) записан в history.txt с ценой {price}.")
     except Exception as e:
         print(f"[ERROR] Ошибка при записи в history.txt: {e}")
 
@@ -194,7 +194,7 @@ def scan_sell_orders():
 
                         order.update(order_status_response["result"])
 
-                        write_to_history(order, action="\nУСПЕШНАЯ ПРОДАЖА: ")
+                        write_to_history(order, action="\nПродажа: ")
                         remove_order(order_id)
                     elif status_from_api == "new":
                         print(f"[INFO] Ордер {order_id} не выполнен (new). Готовим к отмене и пересозданию.")
@@ -204,7 +204,7 @@ def scan_sell_orders():
                             delete_response = AtaixAPI.delete(f"/api/orders/{order_id}")
                             if delete_response:
                                 # Сохраняем в history только старый ордер
-                                write_to_history(order, action="ПЕРЕЗАПУСК Sell: ")
+                                write_to_history(order, action="Перезапуск Продажи: ")
 
                                 # Удаляем старый ордер
                                 remove_order(order_id)
