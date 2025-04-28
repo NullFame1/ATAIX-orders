@@ -89,20 +89,21 @@ def generate_html_report(grouped_data):
                 font-weight: bold;
                 color: #FF5733;
             }
+            .profit-percentage {
+                font-weight: bold;
+                color: #007BFF;
+            }
         </style>
     </head>
     <body>
     <h1>Отчет по Ордеру</h1>
     """
 
-    # Обрабатываем каждый блок с одинаковым originalID
     for originalID, orders in grouped_data.items():
         html_content += f'<div class="report-section"><h2>OriginalID: {originalID}</h2>'
         
-        # Сортируем заказы по времени
         orders_sorted = sorted(orders, key=lambda x: x['время'])
         
-        # Генерируем таблицу для каждого блока
         html_content += '<table><thead><tr><th>Тип события</th><th>OrderID</th><th>Цена</th><th>Кол-во</th><th>Символ</th><th>Время</th><th>Комиссия</th></tr></thead><tbody>'
         
         for order in orders_sorted:
@@ -120,20 +121,16 @@ def generate_html_report(grouped_data):
         
         html_content += '</tbody></table>'
 
-        # Вычисляем доход/расход для каждой группы
         buy_orders = [o for o in orders if 'покупка' in o["событие"].lower()]
         sell_orders = [o for o in orders if 'продажа' in o["событие"].lower()]
 
-        # Проверяем, что количество покупок и продаж совпадает
         if len(buy_orders) != len(sell_orders):
             html_content += '<p class="profit-loss">Ошибка: количество покупок и продаж не совпадает.</p>'
         else:
             total_income = 0
             total_spent = 0
             
-            # Допустим, что продажи идут после покупок
             for buy, sell in zip(buy_orders, sell_orders):
-                # Выводим для диагностики
                 html_content += f"<p>Покупка: Цена={buy['цена']}, Кол-во={buy['кол-во']}, Комиссия={buy['комиссия']}</p>"
                 html_content += f"<p>Продажа: Цена={sell['цена']}, Кол-во={sell['кол-во']}, Комиссия={sell['комиссия']}</p>"
                 
@@ -141,12 +138,30 @@ def generate_html_report(grouped_data):
                 total_income += sell['цена'] * sell['кол-во'] - sell['комиссия']
 
             profit_loss = total_income - total_spent
-            
-            # Округляем до 5 знаков после запятой
             profit_loss_rounded = round(profit_loss, 5)
-            
-            # Выводим результат
-            html_content += f'<p class="profit-loss">Доход/Расход: {profit_loss_rounded:.5f} USD</p>'
+
+            # Вычисляем процент прибыли относительно total_spent
+            if total_spent != 0:
+                profit_percent = (profit_loss / total_spent) * 100
+            else:
+                profit_percent = 0
+
+            profit_percent_rounded = round(profit_percent, 2)
+
+            # Выводим результат дохода/убытка
+            profit_color = "blue" if profit_loss_rounded >= 0 else "red"
+            html_content += f'<p class="profit-loss">Доход/Убыток: <span style="color: {profit_color};">{profit_loss_rounded:.5f} USD</span></p>'
+
+            # Выводим процент дохода/убытка
+            profit_percent = (profit_loss / total_spent) * 100 if total_spent != 0 else 0
+            profit_percent_rounded = round(profit_percent, 2)
+            percent_color = "blue" if profit_percent_rounded >= 0 else "red"
+            html_content += (
+                '<p class="profit-percentage" style="color: black;">'
+                'Процент дохода/убытка: '
+                f'<span style="color: {percent_color};">{profit_percent_rounded:.2f}%</span>'
+                '</p>'
+            )
 
         
         html_content += '</div>'
@@ -156,9 +171,9 @@ def generate_html_report(grouped_data):
     </html>
     """
     
-    # Сохраняем HTML в файл
     with open('report.html', 'w', encoding='utf-8') as report_file:
         report_file.write(html_content)
+
 
 # Запуск программы
 file_path = 'history.txt'  # Укажите путь к вашему файлу history.txt
